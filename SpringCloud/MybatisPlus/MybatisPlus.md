@@ -132,11 +132,11 @@ class UserMapperTest {
 可以看到，在运行过程中打印出的SQL日志，非常标准：
 
 ```SQl
-11:05:01  INFO 15524 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
-11:05:02  INFO 15524 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
-11:05:02 DEBUG 15524 --- [           main] c.i.mp.mapper.UserMapper.selectById      : ==>  Preparing: SELECT id,username,password,phone,info,status,balance,create_time,update_time FROM user WHERE id=?
-11:05:02 DEBUG 15524 --- [           main] c.i.mp.mapper.UserMapper.selectById      : ==> Parameters: 5(Long)
-11:05:02 DEBUG 15524 --- [           main] c.i.mp.mapper.UserMapper.selectById      : <==      Total: 1
+11:05:01  INFO 15524 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+11:05:02  INFO 15524 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+11:05:02 DEBUG 15524 --- [main] c.i.mp.mapper.UserMapper.selectById      : ==>  Preparing: SELECT id,username,password,phone,info,status,balance,create_time,update_time FROM user WHERE id=?
+11:05:02 DEBUG 15524 --- [main] c.i.mp.mapper.UserMapper.selectById      : ==> Parameters: 5(Long)
+11:05:02 DEBUG 15524 --- [main] c.i.mp.mapper.UserMapper.selectById      : <==      Total: 1
 user = User(id=5, username=Lucy, password=123, phone=18688990011, info={"age": 21}, status=1, balance=20000, createTime=Fri Jun 30 11:02:30 CST 2023, updateTime=Fri Jun 30 11:02:30 CST 2023)
 ```
 
@@ -332,3 +332,170 @@ void testQuery() {
 }
 ```
 
+## MybatisPlus核心功能
+
+刚才的案例中都是以id为条件的简单CRUD，一些复杂条件的SQL语句就要用到一些更高级的功能了。
+
+### 方法引用：Lambda的快捷方式
+
+Lambda表达式已经足够简洁，但Java 8还提供了另一种更简洁的表达方式：方法引用。尤其是在Lambda表达式仅仅是调用一个已经存在的方法时。
+
+#### 什么是方法引用？
+
+方法引用可以被看作是Lambda表达式的一种“快捷方式”或“语法糖”。它允许你直接引用现有的方法，而无需重新编写Lambda表达式。方法引用使用::操作符，将方法名与类名或对象名分隔开。
+
+有三种主要的方法引用类型：
+
+1、静态方法引用： ClassName::staticMethodName
+例如：Integer::parseInt （等价于 s -> Integer.parseInt(s)）
+
+2、实例方法引用（指向特定对象）： objectReference::instanceMethodName
+例如：System.out::println （等价于 s -> System.out.println(s))
+例如：假定一个局部变量expensiveTransaction用于存放Transaction类型的对象, 它支持实例 方法getValue，那么你就可以这么写expensiveTransaction::getValue
+
+3、实例方法引用（指向任意对象）： ClassName::instanceMethodName
+例如：String::length （等价于 (String s) -> s.length())
+这种方式有点特殊。它表示引用一个特定类型的所有对象的实例方法。在调用时，Lambda表达式的第一个参数会成为方法的调用者。
+让我们通过一些例子来更好地理解这三种方法引用：
+
+```java
+// 静态方法引用
+Function<String, Integer> stringToInt = Integer::parseInt;
+
+// 实例方法引用（指向特定对象）
+Consumer<String> printString = System.out::println;
+
+// 实例方法引用（指向任意对象）
+Function<String, Integer> stringLength = String::length;
+BiPredicate<List<String>, String> contains = List::contains;
+```
+
+这些方法引用都比对应的Lambda表达式更简洁、更易读。它们直接表达了“使用这个方法”的意图，而无需重复方法的实现细节。
+
+#### 构造函数引用
+
+除了普通方法，方法引用还可以用于构造函数。你可以使用ClassName::new的形式来引用一个类的构造函数。
+
+例如：
+
+```java
+// 无参构造函数引用
+Supplier<List<String>> newListSupplier = ArrayList::new;
+List<String> list = newListSupplier.get(); // 创建一个新的ArrayList
+
+// 有参构造函数引用
+Function<Integer, String[]> stringArrayCreator = String[]::new;
+String[] stringArray = stringArrayCreator.apply(10); //创建一个长度为10的String类型数组。
+```
+
+构造函数引用可以让你像使用普通方法一样使用构造函数，从而可以将其传递给函数式接口，实现延迟创建对象等功能。
+
+方法引用提供了一种比Lambda表达式更简洁、更直接的方式来引用已有的方法或构造函数。在合适的场景下使用方法引用，可以进一步提高代码的可读性和表达力。
+
+### 条件构造器
+
+除了新增以外，修改、删除、查询的SQL语句都需要指定where条件。因此BaseMapper中提供的相关方法除了以id作为where条件以外，还支持更加复杂的where条件。
+
+<img src="assets/image-20250801232055597.png" alt="image-20250801232055597" style="zoom:50%;" align="left">
+
+参数中的Wrapper就是条件构造的抽象类，其下有很多默认实现，继承关系如图：
+
+<img src="assets/image-20250801232216275.png" alt="image-20250801232216275" style="zoom:50%;" align="left">
+
+Wrapper的子类AbstractWrapper提供了where中包含的所有条件构造方法：
+
+<img src="assets/image-20250801232339107.png" alt="image-20250801232339107" style="zoom:50%;" align="left">
+
+而QueryWrapper在AbstractWrapper的基础上拓展了一个select方法，允许指定查询字段：
+
+<img src="assets/image-20250801232518957.png" alt="image-20250801232518957" style="zoom:50%;" align="left">
+
+而UpdateWrapper在AbstractWrapper的基础上拓展了一个set方法，允许指定SQL中的SET部分：
+
+<img src="assets/image-20250801232640265.png" alt="image-20250801232640265" style="zoom:50%;" align="left">
+
+接下来，我们就来看看如何利用Wrapper实现复杂查询。
+
+#### QueryWrapper
+
+无论是修改、删除、查询，都可以使用QueryWrapper来构建查询条件。接下来看一些例子： **查询**：查询出名字中带`o`的，存款大于等于1000元的人。代码如下：
+
+```java
+@Test
+void testQueryWrapper() {
+    // 1.构建查询条件 where name like "%o%" AND balance >= 1000
+    QueryWrapper<User> wrapper = new QueryWrapper<User>()
+            .select("id", "username", "info", "balance")
+            .like("username", "o")
+            .ge("balance", 1000);
+    // 2.查询数据
+    List<User> users = userMapper.selectList(wrapper);
+    users.forEach(System.out::println);
+}
+```
+
+**更新**：更新用户名为jack的用户的余额为2000，代码如下：
+
+```Java
+@Test
+void testUpdateByQueryWrapper() {
+    // 1.构建查询条件 where name = "Jack"
+    QueryWrapper<User> wrapper = new QueryWrapper<User>().eq("username", "Jack");
+    // 2.更新数据，user中非null字段都会作为set语句
+    User user = new User();
+    user.setBalance(2000);
+    userMapper.update(user, wrapper);
+}
+```
+
+#### UpdateWrapper
+
+基于BaseMapper中的update方法更新时只能直接赋值，对于一些复杂的需求就难以实现。 例如：更新id为`1,2,4`的用户的余额，扣200，对应的SQL应该是：
+
+```sql
+UPDATE user SET balance = balance - 200 WHERE id in (1, 2, 4)
+```
+
+SET的赋值结果是基于字段现有值的，这个时候就要利用UpdateWrapper中的setSql功能了：
+
+```java
+@Test
+void testUpdateWrapper() {
+    List<Long> ids = List.of(1L, 2L, 4L);
+    // 1.生成SQL
+    UpdateWrapper<User> wrapper = new UpdateWrapper<User>()
+            .setSql("balance = balance - 200") // SET balance = balance - 200
+            .in("id", ids); // WHERE id in (1, 2, 4)
+        // 2.更新，注意第一个参数可以给null，也就是不填更新字段和数据，
+    // 而是基于UpdateWrapper中的setSQL来更新
+    userMapper.update(null, wrapper);
+}
+```
+
+#### LambdaQueryWrapper
+
+无论是QueryWrapper还是UpdateWrapper在构造条件的时候都需要写死字段名称，会出现字符串`魔法值`。这在编程规范中显然是不推荐的。 那怎么样才能不写字段名，又能知道字段名呢？
+
+其中一种办法是基于变量的`gettter`方法结合反射技术。因此我们只要将条件对应的字段的`getter`方法传递给MybatisPlus，它就能计算出对应的变量名了。而传递方法可以使用JDK8中的`方法引用`和`Lambda`表达式。 因此MybatisPlus又提供了一套基于Lambda的Wrapper，包含两个：
+
+- LambdaQueryWrapper
+- LambdaUpdateWrapper
+
+分别对应QueryWrapper和UpdateWrapper
+
+其使用方式如下：
+
+```java
+@Test
+void testLambdaQueryWrapper() {
+    // 1.构建条件 WHERE username LIKE "%o%" AND balance >= 1000
+    QueryWrapper<User> wrapper = new QueryWrapper<>();
+    wrapper.lambda()
+            .select(User::getId, User::getUsername, User::getInfo, User::getBalance)
+            .like(User::getUsername, "o")
+            .ge(User::getBalance, 1000);
+    // 2.查询
+    List<User> users = userMapper.selectList(wrapper);
+    users.forEach(System.out::println);
+}
+```
