@@ -476,7 +476,7 @@ void testUpdateWrapper() {
 
 无论是QueryWrapper还是UpdateWrapper在构造条件的时候都需要写死字段名称，会出现字符串`魔法值`。这在编程规范中显然是不推荐的。 那怎么样才能不写字段名，又能知道字段名呢？
 
-其中一种办法是基于变量的`gettter`方法结合反射技术。因此我们只要将条件对应的字段的`getter`方法传递给MybatisPlus，它就能计算出对应的变量名了。而传递方法可以使用JDK8中的`方法引用`和`Lambda`表达式。 因此MybatisPlus又提供了一套基于Lambda的Wrapper，包含两个：
+其中一种办法是基于变量的`getter`方法结合反射技术。因此我们只要将条件对应的字段的`getter`方法传递给MybatisPlus，它就能计算出对应的变量名了。而传递方法可以使用JDK8中的`方法引用`和`Lambda`表达式。 因此MybatisPlus又提供了一套基于Lambda的Wrapper，包含两个：
 
 - LambdaQueryWrapper
 - LambdaUpdateWrapper
@@ -499,3 +499,96 @@ void testLambdaQueryWrapper() {
     users.forEach(System.out::println);
 }
 ```
+
+### 自定义SQL
+
+在演示UpdateWrapper的案例中，我们在代码中编写了更新的SQL语句：
+
+<img src="assets/image-20250805164844560.png" alt="image-20250805164844560" style="zoom:50%;" align="left">
+
+这种写法在某些企业 也是不允许的，因为SQL语句最好都维护在持久层，而不是业务层。就当前案例来说，由于条件是in语句，只能将SQL写在Mapper.xml文件，利用foreach来生成动态SQL。
+这是很麻烦的，假如查询条件更复杂，动态SQL的编写也会更加复杂。
+
+所以MybatisPlus提供了自定义SQL功能，可以让我们利用Wrapper生成查询条件，再结合Mapper.xml编写SQL。
+
+#### 基本用法
+
+以当前案例来说，我们可以这样写：
+
+```java
+@Test
+void testCustomWrapper() {
+    // 1.准备自定义查询条件
+    List<Long> ids = List.of(1L, 2L, 4L);
+    QueryWrapper<User> wrapper = new QueryWrapper<User>().in("id", ids);
+
+    // 2.调用mapper的自定义方法，直接传递Wrapper
+    userMapper.deductBalanceByIds(200, wrapper);
+}
+```
+
+然后在UserMapper中自定义SQL：
+
+```java
+public interface UserMapper extends BaseMapper<User> {
+    @Select("UPDATE user SET balance = balance - #{money} ${ew.customSqlSegment}")
+    void deductBalanceByIds(@Param("money") int money, @Param("ew") QueryWrapper<User> wrapper);
+}
+```
+
+这样就省去了编写复杂查询条件的烦恼了。
+
+#### 多表关联
+
+理论上来讲MybatisPlus是不支持多表查询的，不过我们可以利用Wrapper中自定义条件结合自定义SQL来实现多表查询的效果。
+例如，我们要查询出所有收货地址在北京的并且用户id在1、2、4之中的用户
+要是自己基于mybatis实现SQL，大概是这样的：
+
+```xml
+<select id="queryUserByIdAndAddr" resultType="com.itheima.mp.domain.po.User">
+      SELECT *
+      FROM user u
+      INNER JOIN address a ON u.id = a.user_id
+      WHERE u.id
+      <foreach collection="ids" separator="," item="id" open="IN (" close=")">
+          #{id}
+      </foreach>
+      AND a.city = #{city}
+</select>
+```
+
+可以看出其中最复杂的就是where条件的编写，如果业务复杂一些，这里的SQL会更变态。
+但是基于自定义SQL结合Wrapper的玩法，我们就可以利用Wrapper来构建查询条件，然后手写select及from部分，实现多表查询。
+
+查询条件这样来构建：
+
+```java
+@Test
+void testCustomJoinWrapper() {
+    // 1.准备自定义查询条件
+    QueryWrapper<User> wrapper = new QueryWrapper<User>()
+            .in("u.id", List.of(1L, 2L, 4L))
+            .eq("a.city", "北京");
+
+    // 2.调用mapper的自定义方法
+    List<User> users = userMapper.queryUserByWrapper(wrapper);
+
+    users.forEach(System.out::println);
+}
+```
+
+然后在UserMapper中自定义方法：
+
+```java
+@Select("SELECT u.* FROM user u INNER JOIN address a ON u.id = a.user_id ${ew.customSqlSegment}")
+List<User> queryUserByWrapper(@Param("ew")QueryWrapper<User> wrapper);
+```
+
+当然，也可以在UserMapper.xml中写SQL：
+
+```xml
+<select id="queryUserByIdAndAddr" resultType="com.itheima.mp.domain.po.User">
+    SELECT * FROM user u INNER JOIN address a ON u.id = a.user_id ${ew.customSqlSegment}
+</select>
+```
+
