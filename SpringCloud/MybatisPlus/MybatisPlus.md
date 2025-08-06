@@ -592,3 +592,633 @@ List<User> queryUserByWrapper(@Param("ew")QueryWrapper<User> wrapper);
 </select>
 ```
 
+### Service接口
+
+MybatisPlus不仅提供了BaseMapper，还提供了通用的Service接口及默认实现，封装了一些常用的service模板方法。
+
+通用接口位`IService`，默认实现为`ServiceImpl`，其中封装的方法可以分为以下几类：
+
+- `save`：新增
+- `remove`：删除
+- `update`：更新
+- `get`：查询单个结果
+- `list`：查询集合结果
+- `count`：计数
+- `page`：分页查询
+
+#### CRUD
+
+我们先来看下基本的CRUD接口。
+
+**新增：**
+
+<img src="assets/image-20250806165226614.png" alt="image-20250806165226614" style="zoom:50%;" align="left">
+
+- `save`是新增单个元素
+- `saveBatch`是批量新增
+- `saveOrUpdate`是根据id判断，如果数据存在就更新，不存在则新增
+- `saveOrUpdateBatch`是批量的新增或修改
+
+**删除：**
+
+<img src="assets/image-20250806165502177.png" alt="image-20250806165502177" style="zoom:50%;" align="left">
+
+- `removeById`：根据id删除
+- `removeByIds`：根据id批量删除
+- `removeByMap`：根据Map中的键值对为条件删除
+- `remove(Wrapper<T>)`：根据Wrapper条件删除
+- `~~removeBatchByIds~~`：暂不支持
+
+**修改：**
+
+<img src="assets/image-20250806165708241.png" alt="image-20250806165708241" style="zoom:50%;" align="left">
+
+- `updateById`：根据id修改
+- `update(Wrapper<T>)`：根据`UpdateWrapper`修改，`Wrapper`中包含`set`和`where`部分
+- `update(T，Wrapper<T>)`：按照`T`内的数据修改与`Wrapper`匹配到的数据
+- `updateBatchById`：根据id批量修改
+
+**Get：**
+
+<img src="assets/image-20250806165816794.png" alt="image-20250806165816794" style="zoom:50%;" align="left">
+
+- `getById`：根据id查询1条数据
+- `getOne(Wrapper<T>)`：根据`Wrapper`查询1条数据
+- `getBaseMapper`：获取`Service`内的`BaseMapper`实现，某些时候需要直接调用`Mapper`内的自定义`SQL`时可以用这个方法获取到`Mapper`
+
+**List：**
+
+<img src="assets/image-20250806165920081.png" alt="image-20250806165920081" style="zoom:50%;" align="left">
+
+- `listByIds`：根据id批量查询
+- `list(Wrapper<T>)`：根据Wrapper条件查询多条数据
+- `list()`：查询所有
+
+**Count：**
+
+<img src="assets/image-20250806170016364.png" alt="image-20250806170016364" style="zoom: 50%;" align="left">
+
+- `count()`：统计所有数量
+- `count(Wrapper<T>)`：统计符合`Wrapper`条件的数据数量
+
+**getBaseMapper：**
+
+当我们在service中要调用Mapper中自定义SQL时，就必须获取service对应的Mapper，就可以通过这个方法：
+
+<img src="assets/image-20250806170235569.png" alt="image-20250806170235569" style="zoom:50%;" align="left">
+
+#### 基本用法
+
+由于`Service`中经常需要定义与业务有关的自定义方法，因此我们不能直接使用`IService`，而是自定义`Service`接口，然后继承`IService`以拓展方法。同时，让自定义的`Service实现类`继承`ServiceImpl`，这样就不用自己实现`IService`中的接口了。
+
+首先，定义`IUserService`，继承`IService`：
+
+```Java
+package com.itheima.mp.service;
+
+import com.baomidou.mybatisplus.extension.service.IService;
+import com.itheima.mp.domain.po.User;
+
+public interface IUserService extends IService<User> {
+    // 拓展自定义方法
+}
+```
+
+然后，编写`UserServiceImpl`类，继承`ServiceImpl`，实现`UserService`：
+
+```Java
+package com.itheima.mp.service.impl;
+
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.itheima.mp.domain.po.User;
+import com.itheima.mp.domain.po.service.IUserService;
+import com.itheima.mp.mapper.UserMapper;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserServiceImpl extends ServiceImpl<UserMapper, User>
+                                                                                                        implements IUserService {
+}
+```
+
+项目结构如下：
+
+<img src="assets/image-20250806170403575.png" alt="image-20250806170403575" style="zoom:50%;" align="left">
+
+接下来，我们快速实现下面4个接口：
+
+| **编号** | **接口**       | **请求方式** | **请求路径** | **请求参数** | **返回值** |
+| :------- | :------------- | :----------- | :----------- | :----------- | :--------- |
+| 1        | 新增用户       | POST         | /users       | 用户表单实体 | 无         |
+| 2        | 删除用户       | DELETE       | /users/{id}  | 用户id       | 无         |
+| 3        | 根据id查询用户 | GET          | /users/{id}  | 用户id       | 用户VO     |
+| 4        | 根据id批量查询 | GET          | /users       | 用户id集合   | 用户VO集合 |
+
+首先，我们在项目中引入几个依赖：
+
+```XML
+<!--swagger-->
+<dependency>
+    <groupId>com.github.xiaoymin</groupId>
+    <artifactId>knife4j-openapi2-spring-boot-starter</artifactId>
+    <version>4.1.0</version>
+</dependency>
+<!--web-->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+然后需要配置swagger信息：
+
+```YAML
+knife4j:
+  enable: true
+  openapi:
+    title: 用户管理接口文档
+    description: "用户管理接口文档"
+    email: zhanghuyi@itcast.cn
+    concat: 虎哥
+    url: https://www.itcast.cn
+    version: v1.0.0
+    group:
+      default:
+        group-name: default
+        api-rule: package
+        api-rule-resources:
+          - com.itheima.mp.controller
+```
+
+然后，接口需要两个实体：
+
+- UserFormDTO：代表新增时的用户表单
+- UserVO：代表查询的返回结果
+
+首先是UserFormDTO：
+
+```Java
+package com.itheima.mp.domain.dto;
+
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import io.swagger.annotations.ApiModel;
+import io.swagger.annotations.ApiModelProperty;
+import lombok.Data;
+
+@Data
+@ApiModel(description = "用户表单实体")
+public class UserFormDTO {
+
+    @ApiModelProperty("id")
+    private Long id;
+
+    @ApiModelProperty("用户名")
+    private String username;
+
+    @ApiModelProperty("密码")
+    private String password;
+
+    @ApiModelProperty("注册手机号")
+    private String phone;
+
+    @ApiModelProperty("详细信息，JSON风格")
+    private String info;
+
+    @ApiModelProperty("账户余额")
+    private Integer balance;
+}
+```
+
+然后是UserVO：
+
+```Java
+package com.itheima.mp.domain.vo;
+
+import io.swagger.annotations.ApiModel;
+import io.swagger.annotations.ApiModelProperty;
+import lombok.Data;
+
+@Data
+@ApiModel(description = "用户VO实体")
+public class UserVO {
+    
+    @ApiModelProperty("用户id")
+    private Long id;
+    
+    @ApiModelProperty("用户名")
+    private String username;
+    
+    @ApiModelProperty("详细信息")
+    private String info;
+
+    @ApiModelProperty("使用状态（1正常 2冻结）")
+    private Integer status;
+    
+    @ApiModelProperty("账户余额")
+    private Integer balance;
+}
+```
+
+最后，按照Restful风格编写Controller接口方法：
+
+```Java
+package com.itheima.mp.controller;
+
+import cn.hutool.core.bean.BeanUtil;
+import com.itheima.mp.domain.dto.UserFormDTO;
+import com.itheima.mp.domain.po.User;
+import com.itheima.mp.domain.vo.UserVO;
+import com.itheima.mp.service.IUserService;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@Api(tags = "用户管理接口")
+@RequiredArgsConstructor
+@RestController
+@RequestMapping("users")
+public class UserController {
+
+    private final IUserService userService;
+
+    @PostMapping
+    @ApiOperation("新增用户")
+    public void saveUser(@RequestBody UserFormDTO userFormDTO){
+        // 1.转换DTO为PO
+        User user = BeanUtil.copyProperties(userFormDTO, User.class);
+        // 2.新增
+        userService.save(user);
+    }
+
+    @DeleteMapping("/{id}")
+    @ApiOperation("删除用户")
+    public void removeUserById(@PathVariable("id") Long userId){
+        userService.removeById(userId);
+    }
+
+    @GetMapping("/{id}")
+    @ApiOperation("根据id查询用户")
+    public UserVO queryUserById(@PathVariable("id") Long userId){
+        // 1.查询用户
+        User user = userService.getById(userId);
+        // 2.处理vo
+        return BeanUtil.copyProperties(user, UserVO.class);
+    }
+
+    @GetMapping
+    @ApiOperation("根据id集合查询用户")
+    public List<UserVO> queryUserByIds(@RequestParam("ids") List<Long> ids){
+        // 1.查询用户
+        List<User> users = userService.listByIds(ids);
+        // 2.处理vo
+        return BeanUtil.copyToList(users, UserVO.class);
+    }
+}
+```
+
+可以看到上述接口都直接在controller即可实现，无需编写任何service代码，非常方便。
+
+不过，一些带有业务逻辑的接口则需要在service中自定义实现了。例如下面的需求：
+
+- 根据id扣减用户余额
+
+这看起来是个简单修改功能，只要修改用户余额即可。但这个业务包含一些业务逻辑处理：
+
+- 判断用户状态是否正常
+- 判断用户余额是否充足
+
+这些业务逻辑都要在service层来做，另外更新余额需要自定义SQL，要在mapper中来实现。因此，我们除了要编写controller以外，具体的业务还要在service和mapper中编写。
+
+首先在UserController中定义一个方法：
+
+```Java
+@PutMapping("{id}/deduction/{money}")
+@ApiOperation("扣减用户余额")
+public void deductBalance(@PathVariable("id") Long id, @PathVariable("money")Integer money){
+    userService.deductBalance(id, money);
+}
+```
+
+然后是UserService接口：
+
+```Java
+package com.itheima.mp.service;
+
+import com.baomidou.mybatisplus.extension.service.IService;
+import com.itheima.mp.domain.po.User;
+
+public interface IUserService extends IService<User> {
+    void deductBalance(Long id, Integer money);
+}
+```
+
+最后是UserServiceImpl实现类：
+
+```Java
+package com.itheima.mp.service.impl;
+
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.itheima.mp.domain.po.User;
+import com.itheima.mp.mapper.UserMapper;
+import com.itheima.mp.service.IUserService;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
+    @Override
+    public void deductBalance(Long id, Integer money) {
+        // 1.查询用户
+        User user = getById(id);
+        // 2.判断用户状态
+        if (user == null || user.getStatus() == 2) {
+            throw new RuntimeException("用户状态异常");
+        }
+        // 3.判断用户余额
+        if (user.getBalance() < money) {
+            throw new RuntimeException("用户余额不足");
+        }
+        // 4.扣减余额
+        baseMapper.deductMoneyById(id, money);
+    }
+}
+```
+
+最后是mapper：
+
+```Java
+@Update("UPDATE user SET balance = balance - #{money} WHERE id = #{id}")
+void deductMoneyById(@Param("id") Long id, @Param("money") Integer money);
+```
+
+#### Lambda
+
+IService中还提供了Lambda功能来简化我们的复杂查询及更新功能。我们通过两个案例来学习一下。
+
+案例一：实现一个根据复杂条件查询用户的接口，查询条件如下：
+
+- name：用户名关键字，可以为空
+- status：用户状态，可以为空
+- minBalance：最小余额，可以为空
+- maxBalance：最大余额，可以为空
+
+可以理解成一个用户的后台管理界面，管理员可以自己选择条件来筛选用户，因此上述条件不一定存在，需要做判断。
+
+我们首先需要定义一个查询条件实体，UserQuery实体：
+
+```Java
+package com.itheima.mp.domain.query;
+
+import io.swagger.annotations.ApiModel;
+import io.swagger.annotations.ApiModelProperty;
+import lombok.Data;
+
+@Data
+@ApiModel(description = "用户查询条件实体")
+public class UserQuery {
+    @ApiModelProperty("用户名关键字")
+    private String name;
+    @ApiModelProperty("用户状态：1-正常，2-冻结")
+    private Integer status;
+    @ApiModelProperty("余额最小值")
+    private Integer minBalance;
+    @ApiModelProperty("余额最大值")
+    private Integer maxBalance;
+}
+```
+
+接下来我们在UserController中定义一个controller方法：
+
+```Java
+@GetMapping("/list")
+@ApiOperation("根据id集合查询用户")
+public List<UserVO> queryUsers(UserQuery query){
+    // 1.组织条件
+    String username = query.getName();
+    Integer status = query.getStatus();
+    Integer minBalance = query.getMinBalance();
+    Integer maxBalance = query.getMaxBalance();
+    LambdaQueryWrapper<User> wrapper = new QueryWrapper<User>().lambda()
+            .like(username != null, User::getUsername, username)
+            .eq(status != null, User::getStatus, status)
+            .ge(minBalance != null, User::getBalance, minBalance)
+            .le(maxBalance != null, User::getBalance, maxBalance);
+    // 2.查询用户
+    List<User> users = userService.list(wrapper);
+    // 3.处理vo
+    return BeanUtil.copyToList(users, UserVO.class);
+}
+```
+
+在组织查询条件的时候，我们加入了 `username != null` 这样的参数，意思就是当条件成立时才会添加这个查询条件，类似Mybatis的mapper.xml文件中的`<if>`标签。这样就实现了动态查询条件效果了。
+
+不过，上述条件构建的代码太麻烦了。 因此Service中对`LambdaQueryWrapper`和`LambdaUpdateWrapper`的用法进一步做了简化。我们无需自己通过`new`的方式来创建`Wrapper`，而是直接调用`lambdaQuery`和`lambdaUpdate`方法：
+
+基于Lambda查询：
+
+```Java
+@GetMapping("/list")
+@ApiOperation("根据id集合查询用户")
+public List<UserVO> queryUsers(UserQuery query){
+    // 1.组织条件
+    String username = query.getName();
+    Integer status = query.getStatus();
+    Integer minBalance = query.getMinBalance();
+    Integer maxBalance = query.getMaxBalance();
+    // 2.查询用户
+    List<User> users = userService.lambdaQuery()
+            .like(username != null, User::getUsername, username)
+            .eq(status != null, User::getStatus, status)
+            .ge(minBalance != null, User::getBalance, minBalance)
+            .le(maxBalance != null, User::getBalance, maxBalance)
+            .list();
+    // 3.处理vo
+    return BeanUtil.copyToList(users, UserVO.class);
+}
+```
+
+可以发现lambdaQuery方法中除了可以构建条件，还需要在链式编程的最后添加一个`list()`，这是在告诉MP我们的调用结果需要是一个list集合。这里不仅可以用`list()`，可选的方法有：
+
+- `.one()`：最多1个结果
+- `.list()`：返回集合结果
+- `.count()`：返回计数结果
+
+MybatisPlus会根据链式编程的最后一个方法来判断最终的返回结果。
+
+与lambdaQuery方法类似，IService中的lambdaUpdate方法可以非常方便的实现复杂更新业务。
+
+例如下面的需求：
+
+> 需求：改造根据id修改用户余额的接口，要求如下
+>
+> - 如果扣减后余额为0，则将用户status修改为冻结状态（2）
+
+也就是说我们在扣减用户余额时，需要对用户剩余余额做出判断，如果发现剩余余额为0，则应该将status修改为2，这就是说update语句的set部分是动态的。
+
+实现如下：
+
+```Java
+@Override
+@Transactional
+public void deductBalance(Long id, Integer money) {
+    // 1.查询用户
+    User user = getById(id);
+    // 2.校验用户状态
+    if (user == null || user.getStatus() == 2) {
+        throw new RuntimeException("用户状态异常！");
+    }
+    // 3.校验余额是否充足
+    if (user.getBalance() < money) {
+        throw new RuntimeException("用户余额不足！");
+    }
+    // 4.扣减余额 update tb_user set balance = balance - ?
+    int remainBalance = user.getBalance() - money;
+    lambdaUpdate()
+            .set(User::getBalance, remainBalance) // 更新余额
+            .set(remainBalance == 0, User::getStatus, 2) // 动态判断，是否更新status
+            .eq(User::getId, id)
+            .eq(User::getBalance, user.getBalance()) // 乐观锁
+            .update();
+}
+```
+
+#### 批量新增
+
+IService中的批量新增功能使用起来非常方便，但有一点注意事项，我们先来测试一下。 首先我们测试逐条插入数据：
+
+```Java
+@Test
+void testSaveOneByOne() {
+    long b = System.currentTimeMillis();
+    for (int i = 1; i <= 100000; i++) {
+        userService.save(buildUser(i));
+    }
+    long e = System.currentTimeMillis();
+    System.out.println("耗时：" + (e - b));
+}
+
+private User buildUser(int i) {
+    User user = new User();
+    user.setUsername("user_" + i);
+    user.setPassword("123");
+    user.setPhone("" + (18688190000L + i));
+    user.setBalance(2000);
+    user.setInfo("{\"age\": 24, \"intro\": \"英文老师\", \"gender\": \"female\"}");
+    user.setCreateTime(LocalDateTime.now());
+    user.setUpdateTime(user.getCreateTime());
+    return user;
+}
+```
+
+执行结果如下：
+
+<img src="assets/image-20250806170656362.png" alt="image-20250806170656362" style="zoom:50%;" align="left">
+
+可以看到速度非常慢。
+
+然后再试试MybatisPlus的批处理：
+
+```Java
+@Test
+void testSaveBatch() {
+    // 准备10万条数据
+    List<User> list = new ArrayList<>(1000);
+    long b = System.currentTimeMillis();
+    for (int i = 1; i <= 100000; i++) {
+        list.add(buildUser(i));
+        // 每1000条批量插入一次
+        if (i % 1000 == 0) {
+            userService.saveBatch(list);
+            list.clear();
+        }
+    }
+    long e = System.currentTimeMillis();
+    System.out.println("耗时：" + (e - b));
+}
+```
+
+执行最终耗时如下：
+
+<img src="assets/image-20250806170750118.png" alt="image-20250806170750118" style="zoom:50%;" align="left">
+
+可以看到使用了批处理以后，比逐条新增效率提高了10倍左右，性能还是不错的。
+
+不过，我们简单查看一下`MybatisPlus`源码：
+
+```Java
+@Transactional(rollbackFor = Exception.class)
+@Override
+public boolean saveBatch(Collection<T> entityList, int batchSize) {
+    String sqlStatement = getSqlStatement(SqlMethod.INSERT_ONE);
+    return executeBatch(entityList, batchSize, (sqlSession, entity) -> sqlSession.insert(sqlStatement, entity));
+}
+// ...SqlHelper
+public static <E> boolean executeBatch(Class<?> entityClass, Log log, Collection<E> list, int batchSize, BiConsumer<SqlSession, E> consumer) {
+    Assert.isFalse(batchSize < 1, "batchSize must not be less than one");
+    return !CollectionUtils.isEmpty(list) && executeBatch(entityClass, log, sqlSession -> {
+        int size = list.size();
+        int idxLimit = Math.min(batchSize, size);
+        int i = 1;
+        for (E element : list) {
+            consumer.accept(sqlSession, element);
+            if (i == idxLimit) {
+                sqlSession.flushStatements();
+                idxLimit = Math.min(idxLimit + batchSize, size);
+            }
+            i++;
+        }
+    });
+}
+```
+
+可以发现其实`MybatisPlus`的批处理是基于`PrepareStatement`的预编译模式，然后批量提交，最终在数据库执行时还是会有多条insert语句，逐条插入数据。SQL类似这样：
+
+```SQL
+Preparing: INSERT INTO user ( username, password, phone, info, balance, create_time, update_time ) VALUES ( ?, ?, ?, ?, ?, ?, ? )
+Parameters: user_1, 123, 18688190001, "", 2000, 2023-07-01, 2023-07-01
+Parameters: user_2, 123, 18688190002, "", 2000, 2023-07-01, 2023-07-01
+Parameters: user_3, 123, 18688190003, "", 2000, 2023-07-01, 2023-07-01
+```
+
+而如果想要得到最佳性能，最好是将多条SQL合并为一条，像这样：
+
+```SQL
+INSERT INTO user ( username, password, phone, info, balance, create_time, update_time )
+VALUES 
+(user_1, 123, 18688190001, "", 2000, 2023-07-01, 2023-07-01),
+(user_2, 123, 18688190002, "", 2000, 2023-07-01, 2023-07-01),
+(user_3, 123, 18688190003, "", 2000, 2023-07-01, 2023-07-01),
+(user_4, 123, 18688190004, "", 2000, 2023-07-01, 2023-07-01);
+```
+
+该怎么做呢？
+
+MySQL的客户端连接参数中有这样的一个参数：`rewriteBatchedStatements`。顾名思义，就是重写批处理的`statement`语句。参考文档：
+
+https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-performance-extensions.html#cj-conn-prop_rewriteBatchedStatements
+
+这个参数的默认值是false，我们需要修改连接参数，将其配置为true
+
+修改项目中的application.yml文件，在jdbc的url后面添加参数`&rewriteBatchedStatements=true`:
+
+```YAML
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/mp?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: MySQL123
+```
+
+再次测试插入10万条数据，可以发现速度有非常明显的提升：
+
+<img src="assets/image-20250806171038265.png" alt="image-20250806171038265" style="zoom:50%;" align="left">
+
+在`ClientPreparedStatement`的`executeBatchInternal`中，有判断`rewriteBatchedStatements`值是否为true并重写SQL的功能：
+
+最终，SQL被重写了：
+
+<img src="assets/image-20250806171221216.png" alt="image-20250806171221216" style="zoom:50%;" align="left">
