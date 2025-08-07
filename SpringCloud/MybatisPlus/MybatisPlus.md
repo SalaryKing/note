@@ -1222,3 +1222,170 @@ spring:
 最终，SQL被重写了：
 
 <img src="assets/image-20250806171221216.png" alt="image-20250806171221216" style="zoom:50%;" align="left">
+
+## MybatisPlus扩展功能
+
+### 代码生成
+
+在使用MybatisPlus以后，基础的`Mapper`、`Service`、`PO`代码相对固定，重复编写也比较麻烦。因此MybatisPlus官方提供了代码生成器根据数据库表结构生成`PO`、`Mapper`、`Service`等相关代码。只不过代码生成器同样要编码使用，也很麻烦。
+
+这里推荐大家使用一款`MybatisPlus`的插件，它可以基于图形化界面完成`MybatisPlus`的代码生成，非常简单。
+
+#### 安装插件
+
+在`Idea`的plugins市场中搜索并安装`MyBatisPlus`插件：
+
+<img src="assets/image-20250807233256310.png" alt="image-20250807233256310" style="zoom:40%;" align="left">
+
+然后重启Idea即可使用。
+
+#### 使用
+
+刚好数据库中还有一张address表尚未生成对应的实体和mapper等基础代码。我们利用插件生成一下。 首先需要配置数据库地址，在Idea顶部菜单中，找到`other`(23版以上点工具)，选择`Config Database`：
+
+<img src="assets/image-20250807233559317.png" alt="image-20250807233559317" style="zoom:45%;" align="left">
+
+在弹出的窗口中填写数据库连接的基本信息：
+
+<img src="assets/image-20250807233739329.png" alt="image-20250807233739329" style="zoom:50%;" align="left">
+
+点击OK保存。
+
+然后再次点击Idea顶部菜单中的other(23版以上点工具)，然后选择`Code Generator`:
+
+<img src="assets/image-20250807234058437.png" alt="image-20250807234058437" style="zoom:50%;" align="left">
+
+在弹出的表单中填写信息：
+
+<img src="assets/image-20250807234159015.png" alt="image-20250807234159015" style="zoom:40%;" align="left">
+
+最终，代码自动生成到指定的位置了。
+
+### 静态工具
+
+有的时候Service之间也会相互调用，为了避免出现循环依赖问题，MybatisPlus提供一个静态工具类：`Db`，其中的一些静态方法与`IService`中方法签名基本一致，也可以帮助我们实现CRUD功能：
+
+<img src="assets/image-20250807234356735.png" alt="image-20250807234356735" style="zoom:50%;" align="left">
+
+示例：
+
+```Java
+@Test
+void testDbGet() {
+    User user = Db.getById(1L, User.class);
+    System.out.println(user);
+}
+
+@Test
+void testDbList() {
+    // 利用Db实现复杂条件查询
+    List<User> list = Db.lambdaQuery(User.class)
+            .like(User::getUsername, "o")
+            .ge(User::getBalance, 1000)
+            .list();
+    list.forEach(System.out::println);
+}
+
+@Test
+void testDbUpdate() {
+    Db.lambdaUpdate(User.class)
+            .set(User::getBalance, 2000)
+            .eq(User::getUsername, "Rose");
+}
+```
+
+需求：改造根据id用户查询的接口，查询用户的同时返回用户收货地址列表
+
+首先，我们要添加一个收货地址的VO对象：
+
+```Java
+package com.itheima.mp.domain.vo;
+
+import io.swagger.annotations.ApiModel;
+import io.swagger.annotations.ApiModelProperty;
+import lombok.Data;
+
+@Data
+@ApiModel(description = "收货地址VO")
+public class AddressVO{
+
+    @ApiModelProperty("id")
+    private Long id;
+
+    @ApiModelProperty("用户ID")
+    private Long userId;
+
+    @ApiModelProperty("省")
+    private String province;
+
+    @ApiModelProperty("市")
+    private String city;
+
+    @ApiModelProperty("县/区")
+    private String town;
+
+    @ApiModelProperty("手机")
+    private String mobile;
+
+    @ApiModelProperty("详细地址")
+    private String street;
+
+    @ApiModelProperty("联系人")
+    private String contact;
+
+    @ApiModelProperty("是否是默认 1默认 0否")
+    private Boolean isDefault;
+
+    @ApiModelProperty("备注")
+    private String notes;
+    
+}
+```
+
+然后，改造原来的UserVO，添加一个地址属性：
+
+<img src="assets/image-20250807234545471.png" alt="image-20250807234545471" style="zoom:50%;" align="left">
+
+接下来，修改UserController中根据id查询用户的业务接口：
+
+```Java
+@GetMapping("/{id}")
+@ApiOperation("根据id查询用户")
+public UserVO queryUserById(@PathVariable("id") Long userId){
+    // 基于自定义service方法查询
+    return userService.queryUserAndAddressById(userId);
+}
+```
+
+由于查询业务复杂，所以要在service层来实现。首先在IUserService中定义方法：
+
+```Java
+public interface IUserService extends IService<User> {
+    void deduct(Long id, Integer money);
+
+    UserVO queryUserAndAddressById(Long userId);
+}
+```
+
+然后，在UserServiceImpl中实现该方法：
+
+```Java
+@Override
+public UserVO queryUserAndAddressById(Long userId) {
+    // 1.查询用户
+    User user = getById(userId);
+    if (user == null) {
+        return null;
+    }
+    // 2.查询收货地址
+    List<Address> addresses = Db.lambdaQuery(Address.class)
+            .eq(Address::getUserId, userId)
+            .list();
+    // 3.处理vo
+    UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
+    userVO.setAddresses(BeanUtil.copyToList(addresses, AddressVO.class));
+    return userVO;
+}
+```
+
+在查询地址时，我们采用了Db的静态方法，因此避免了注入AddressService，减少了循环依赖的风险。
