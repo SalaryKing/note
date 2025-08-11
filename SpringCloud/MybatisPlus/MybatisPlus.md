@@ -126,6 +126,7 @@ class UserMapperTest {
     void testDelete() {
         userMapper.deleteById(5L);
     }
+    
 }
 ```
 
@@ -696,8 +697,8 @@ import com.itheima.mp.mapper.UserMapper;
 import org.springframework.stereotype.Service;
 
 @Service
-public class UserServiceImpl extends ServiceImpl<UserMapper, User>
-                                                                                                        implements IUserService {
+public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService{
+    
 }
 ```
 
@@ -787,6 +788,7 @@ public class UserFormDTO {
 
     @ApiModelProperty("账户余额")
     private Integer balance;
+    
 }
 ```
 
@@ -817,6 +819,7 @@ public class UserVO {
     
     @ApiModelProperty("账户余额")
     private Integer balance;
+    
 }
 ```
 
@@ -877,6 +880,7 @@ public class UserController {
         // 2.处理vo
         return BeanUtil.copyToList(users, UserVO.class);
     }
+    
 }
 ```
 
