@@ -231,5 +231,300 @@ source /root/.bashrc
 
 接下来，试试看新的命令吧。
 
+### 数据卷
+
+容器是隔离环境，容器内程序的文件、配置、运行时产生的容器都在容器内部，我们要读写容器内的文件非常不方便。思考几个问题：
+
+- 如果要升级MySQL版本，需要销毁旧容器，那么数据岂不是跟着被销毁了？
+- MySQL、Nginx容器运行后，如果我要修改其中的某些配置该怎么办？
+- 我想要让Nginx代理我的静态资源怎么办？
+
+因此，容器提供程序的运行环境，但是**程序运行产生的数据、程序运行依赖的配置都应该与容器解耦**。
+
+#### 什么是数据卷
+
+**数据卷（volume）**是一个虚拟目录，是**容器内目录**与**宿主机目录**之间映射的桥梁。
+
+以Nginx为例，我们知道Nginx中有两个关键的目录：
+
+- `html`：放置一些静态资源
+- `conf`：放置配置文件
+
+如果我们要让Nginx代理我们的静态资源，最好是放到`html`目录；如果我们要修改Nginx的配置，最好是找到`conf`下的`nginx.conf`文件。
+
+但遗憾的是，容器运行的Nginx所有的文件都在容器内部。所以我们必须利用数据卷将两个目录与宿主机目录关联，方便我们操作。如图：
+
+<img src="assets/image-20250818231328194.png" alt="image-20250818231328194" style="zoom:50%;" align="left">
+
+在上图中：
+
+- 我们创建了两个数据卷：`conf`、`html`
+- Nginx容器内部的`conf`目录和`html`目录分别与两个数据卷关联。
+- 而数据卷conf和html分别指向了宿主机的`/var/lib/docker/volumes/conf/_data`目录和`/var/lib/docker/volumes/html/_data`目录
+
+这样以来，容器内的`conf`和`html`目录就 与宿主机的`conf`和`html`目录关联起来，我们称为**挂载**。此时，我们操作宿主机的`/var/lib/docker/volumes/html/_data`就是在操作容器内的`/usr/share/nginx/html/_data`目录。只要我们将静态资源放入宿主机对应目录，就可以被Nginx代理了。
+
+`/var/lib/docker/volumes`这个目录就是默认的存放所有容器数据卷的目录，其下再根据数据卷名称创建新目录，格式为`/数据卷名/_data`。
+
+**为什么不让容器目录直接指向宿主机目录呢**？
+
+- 因为直接指向宿主机目录就与宿主机强耦合了，如果切换了环境，宿主机目录就可能发生改变了。由于容器一旦创建，目录挂载就无法修改，这样容器就无法正常工作了。
+- 但是容器指向数据卷，一个逻辑名称，而数据卷再指向宿主机目录，就不存在强耦合。如果宿主机目录发生改变，只要改变数据卷与宿主机目录之间的映射关系即可。
+
+不过，我们通过由于数据卷目录比较深，不好寻找，通常我们也**允许让容器直接与宿主机目录挂载而不使用数据卷**
+
+#### 数据卷命令
+
+数据卷的相关命令有：
+
+| **命令**              | **说明**             | **文档地址**                                                 |
+| :-------------------- | :------------------- | :----------------------------------------------------------- |
+| docker volume create  | 创建数据卷           | [docker volume create](https://docs.docker.com/engine/reference/commandline/volume_create/) |
+| docker volume ls      | 查看所有数据卷       | [docs.docker.com](https://docs.docker.com/engine/reference/commandline/volume_ls/) |
+| docker volume rm      | 删除指定数据卷       | [docs.docker.com](https://docs.docker.com/engine/reference/commandline/volume_prune/) |
+| docker volume inspect | 查看某个数据卷的详情 | [docs.docker.com](https://docs.docker.com/engine/reference/commandline/volume_inspect/) |
+| docker volume prune   | 清除数据卷           | [docker volume prune](https://docs.docker.com/engine/reference/commandline/volume_prune/) |
+
+注意：容器与数据卷的挂载要在创建容器时配置，对于创建好的容器，是不能设置数据卷的。而且**创建容器的过程中，数据卷会自动创建**。
+
+教学**演示环节**：演示一下nginx的html目录挂载
+
+```PowerShell
+# 1.首先创建容器并指定数据卷，注意通过 -v 参数来指定数据卷
+docker run -d --name nginx -p 80:80 -v html:/usr/share/nginx/html nginx
+
+# 2.然后查看数据卷
+docker volume ls
+# 结果
+DRIVER    VOLUME NAME
+local     29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f
+local     html
+
+# 3.查看数据卷详情
+docker volume inspect html
+# 结果
+[
+    {
+        "CreatedAt": "2024-05-17T19:57:08+08:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/html/_data",
+        "Name": "html",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+# 4.查看/var/lib/docker/volumes/html/_data目录
+ll /var/lib/docker/volumes/html/_data
+# 可以看到与nginx的html目录内容一样，结果如下：
+-rw-r--r--. 1 root root 497 12月 28 2021 50x.html
+-rw-r--r--. 1 root root 615 12月 28 2021 index.html
+
+# 5.进入该目录，并随意修改index.html内容
+cd /var/lib/docker/volumes/html/_data
+vi index.html
+
+# 6.打开页面，查看效果
+
+# 7.进入容器内部，查看/usr/share/nginx/html目录内的文件是否变化
+docker exec -it nginx bash
+```
+
+教学**演示环节**：演示一下MySQL的匿名数据卷
+
+```PowerShell
+# 1.查看MySQL容器详细信息
+docker inspect mysql
+# 关注其中.Config.Volumes部分和.Mounts部分
+```
+
+我们关注两部分内容，第一是`.Config.Volumes`部分：
+
+```JSON
+{
+  "Config": {
+    // ... 略
+    "Volumes": {
+      "/var/lib/mysql": {}
+    }
+    // ... 略
+  }
+}
+```
+
+可以发现这个容器声明了一个本地目录，需要挂载数据卷，但是**数据卷未定义**。这就是匿名卷。
+
+然后，我们再看结果中的`.Mounts`部分：
+
+```JSON
+{
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f",
+      "Source": "/var/lib/docker/volumes/29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f/_data",
+      "Destination": "/var/lib/mysql",
+      "Driver": "local",
+    }
+  ]
+}
+```
+
+可以发现，其中有几个关键属性：
+
+- Name：数据卷名称。由于定义容器未设置容器名，这里的就是匿名卷自动生成的名字，一串hash值。
+- Source：宿主机目录
+- Destination : 容器内的目录
+
+上述配置是将容器内的`/var/lib/mysql`这个目录，与数据卷`29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f`挂载。于是在宿主机中就有了`/var/lib/docker/volumes/29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f/_data`这个目录。这就是匿名数据卷对应的目录，其使用方式与普通数据卷没有差别。
+
+接下来，可以查看该目录下的MySQL的data文件：
+
+```Bash
+ls -l /var/lib/docker/volumes/29524ff09715d3688eae3f99803a2796558dbd00ca584a25a4bbc193ca82459f/_data
+```
+
+注意：每一个不同的镜像，将来创建容器后内部有哪些目录可以挂载，可以参考DockerHub对应的页面
+
+#### 挂载本地目录或文件
+
+可以发现，数据卷的目录结构较深，如果我们去操作数据卷目录会不太方便。在很多情况下，我们会直接将容器目录与宿主机指定目录挂载。挂载语法与数据卷类似：
+
+```Bash
+# 挂载本地目录
+-v 本地目录:容器内目录
+# 挂载本地文件
+-v 本地文件:容器内文件
+```
+
+**注意**：本地目录或文件必须以 `/` 或 `./`开头，如果直接以名字开头，会被识别为数据卷名而非本地目录名。
+
+例如：
+
+```Bash
+-v mysql:/var/lib/mysql # 会被识别为一个数据卷叫mysql，运行时会自动创建这个数据卷
+-v ./mysql:/var/lib/mysql # 会被识别为当前目录下的mysql目录，运行时如果不存在会创建目录
+```
+
+**教学演示**，删除并重新创建mysql容器，并完成本地目录挂载：
+
+- 挂载`/root/mysql/data`到容器内的`/var/lib/mysql`目录
+- 挂载`/root/mysql/init`到容器内的`/docker-entrypoint-initdb.d`目录（初始化的SQL脚本目录）
+- 挂载`/root/mysql/conf`到容器内的`/etc/mysql/conf.d`目录（这个是MySQL配置文件目录）
+
+在课前资料中已经准备好了mysql的`init`目录和`conf`目录：
+
+<img src="assets/image-20250818232042265.png" alt="image-20250818232042265" style="zoom:50%;" align="left">
+
+以及对应的初始化SQL脚本和配置文件：
+
+<img src="assets/image-20250818232121451.png" alt="image-20250818232121451" style="zoom:50%;" align="left">
+
+<img src="assets/image-20250818232149934.png" alt="image-20250818232149934" style="zoom:50%;" align="left">
+
+其中，hm.cnf主要是配置了MySQL的默认编码，改为utf8mb4；而hmall.sql则是后面我们要用到的黑马商城项目的初始化SQL脚本。
+
+我们直接将整个mysql目录上传至虚拟机的`/root`目录下：
+
+<img src="assets/image-20250818232236141.png" alt="image-20250818232236141" style="zoom:50%;" align="left">
+
+接下来，我们演示本地目录挂载：
+
+```Bash
+# 1.删除原来的MySQL容器
+docker rm -f mysql
+
+# 2.进入root目录
+cd ~
+
+# 3.创建并运行新mysql容器，挂载本地目录
+docker run -d \
+  --name mysql \
+  -p 3306:3306 \
+  -e TZ=Asia/Shanghai \
+  -e MYSQL_ROOT_PASSWORD=123 \
+  -v ./mysql/data:/var/lib/mysql \
+  -v ./mysql/conf:/etc/mysql/conf.d \
+  -v ./mysql/init:/docker-entrypoint-initdb.d \
+  mysql
+
+# 4.查看root目录，可以发现~/mysql/data目录已经自动创建好了
+ls -l mysql
+# 结果：
+总用量 4
+drwxr-xr-x. 2 root    root   20 5月  19 15:11 conf
+drwxr-xr-x. 7 polkitd root 4096 5月  19 15:11 data
+drwxr-xr-x. 2 root    root   23 5月  19 15:11 init
+
+# 查看data目录，会发现里面有大量数据库数据，说明数据库完成了初始化
+ls -l data
+
+# 5.查看MySQL容器内数据
+# 5.1.进入MySQL
+docker exec -it mysql mysql -uroot -p123
+# 5.2.查看编码表
+show variables like "%char%";
+# 5.3.结果，发现编码是utf8mb4没有问题
++--------------------------+--------------------------------+
+| Variable_name            | Value                          |
++--------------------------+--------------------------------+
+| character_set_client     | utf8mb4                        |
+| character_set_connection | utf8mb4                        |
+| character_set_database   | utf8mb4                        |
+| character_set_filesystem | binary                         |
+| character_set_results    | utf8mb4                        |
+| character_set_server     | utf8mb4                        |
+| character_set_system     | utf8mb3                        |
+| character_sets_dir       | /usr/share/mysql-8.0/charsets/ |
++--------------------------+--------------------------------+
+
+# 6.查看数据
+# 6.1.查看数据库
+show databases;
+# 结果，hmall是黑马商城数据库
++--------------------+
+| Database           |
++--------------------+
+| hmall              |
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
++--------------------+
+5 rows in set (0.00 sec)
+# 6.2.切换到hmall数据库
+use hmall;
+# 6.3.查看表
+show tables;
+# 结果：
++-----------------+
+| Tables_in_hmall |
++-----------------+
+| address         |
+| cart            |
+| item            |
+| order           |
+| order_detail    |
+| order_logistics |
+| pay_order       |
+| user            |
++-----------------+
+# 6.4.查看address表数据
++----+---------+----------+--------+----------+-------------+---------------+-----------+------------+-------+
+| id | user_id | province | city   | town     | mobile      | street        | contact   | is_default | notes |
++----+---------+----------+--------+----------+-------------+---------------+-----------+------------+-------+
+| 59 |       1 | 北京     | 北京   | 朝阳区    | 13900112222 | 金燕龙办公楼   | 李佳诚    | 0          | NULL  |
+| 60 |       1 | 北京     | 北京   | 朝阳区    | 13700221122 | 修正大厦       | 李佳红    | 0          | NULL  |
+| 61 |       1 | 上海     | 上海   | 浦东新区  | 13301212233 | 航头镇航头路   | 李佳星    | 1          | NULL  |
+| 63 |       1 | 广东     | 佛山   | 永春      | 13301212233 | 永春武馆       | 李晓龙    | 0          | NULL  |
++----+---------+----------+--------+----------+-------------+---------------+-----------+------------+-------+
+4 rows in set (0.00 sec)
+```
+
+
+
+
+
 
 
