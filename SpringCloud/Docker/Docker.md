@@ -522,9 +522,166 @@ show tables;
 4 rows in set (0.00 sec)
 ```
 
+### 镜像
 
+前面我们一直在使用别人准备好的镜像，那如果我要部署一个Java项目，把它打包为一个镜像该怎么做呢？
 
+#### 镜像结构
 
+要想自己构建镜像，必须先了解镜像的结构。
 
+之前我们说过，镜像之所以能让我们快速跨操作系统部署应用而忽略其运行环境、配置，就是因为镜像中包含了程序运行需要的系统函数库、环境、配置、依赖。
 
+因此，自定义镜像本质就是依次准备好程序运行的基础环境、依赖、应用本身、运行配置等文件，并且打包而成。
+
+举个例子，我们要从0部署一个Java应用，大概流程是这样：
+
+- 准备一个linux服务（CentOS或者Ubuntu均可）
+- 安装并配置JDK
+- 上传Jar包
+- 运行jar包
+
+那因此，我们打包镜像也是分成这么几步：
+
+- 准备Linux运行环境（java项目并不需要完整的操作系统，仅仅是基础运行环境即可）
+- 安装并配置JDK
+- 拷贝jar包
+- 配置启动脚本
+
+上述步骤中的每一次操作其实都是在生产一些文件（系统运行环境、函数库、配置最终都是磁盘文件），所以**镜像就是一堆文件的集合**。
+
+但需要注意的是，镜像文件不是随意堆放的，而是按照操作的步骤分层叠加而成，每一层形成的文件都会单独打包并标记一个唯一id，称为**Layer**（**层**）。这样，如果我们构建时用到的某些层其他人已经制作过，就可以直接拷贝使用这些层，而不用重复制作。
+
+例如，第一步中需要的Linux运行环境，通用性就很强，所以Docker官方就制作了这样的只包含Linux运行环境的镜像。我们在制作java镜像时，就无需重复制作，直接使用Docker官方提供的CentOS或Ubuntu镜像作为基础镜像。然后再搭建其它层即可，这样逐层搭建，最终整个Java项目的镜像结构如图所示：
+
+<img src="assets/image-20250825215612520.png" alt="image-20250825215612520" style="zoom:45%;" align="left">
+
+#### Dockerfile
+
+由于制作镜像的过程中，需要逐层处理和打包，比较复杂，所以Docker就提供了自动打包镜像的功能。我们只需要将打包的过程，每一层要做的事情用固定的语法写下来，交给Docker去执行即可。
+
+而这种记录镜像结构的文件就称为**Dockerfile**，其对应的语法可以参考官方文档：
+
+https://docs.docker.com/engine/reference/builder/
+
+其中的语法比较多，比较常用的有：
+
+| **指令**       | **说明**                                     | **示例**                     |
+| :------------- | :------------------------------------------- | :--------------------------- |
+| **FROM**       | 指定基础镜像                                 | `FROM centos:6`              |
+| **ENV**        | 设置环境变量，可在后面指令使用               | `ENV key value`              |
+| **COPY**       | 拷贝本地文件到镜像的指定目录                 | `COPY ./xx.jar /tmp/app.jar` |
+| **RUN**        | 执行Linux的shell命令，一般是安装过程的命令   | `RUN yum install gcc`        |
+| **EXPOSE**     | 指定容器运行时监听的端口，是给镜像使用者看的 | EXPOSE 8080                  |
+| **ENTRYPOINT** | 镜像中应用的启动命令，容器运行时调用         | ENTRYPOINT java -jar xx.jar  |
+
+例如，要基于Ubuntu镜像来构建一个Java应用，其Dockerfile内容如下：
+
+```Dockerfile
+# 指定基础镜像
+FROM ubuntu:16.04
+# 配置环境变量，JDK的安装目录、容器内时区
+ENV JAVA_DIR=/usr/local
+ENV TZ=Asia/Shanghai
+# 拷贝jdk和java项目的包
+COPY ./jdk8.tar.gz $JAVA_DIR/
+COPY ./docker-demo.jar /tmp/app.jar
+# 设定时区
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# 安装JDK
+RUN cd $JAVA_DIR \
+ && tar -xf ./jdk8.tar.gz \
+ && mv ./jdk1.8.0_144 ./java8
+# 配置环境变量
+ENV JAVA_HOME=$JAVA_DIR/java8
+ENV PATH=$PATH:$JAVA_HOME/bin
+# 指定项目监听的端口
+EXPOSE 8080
+# 入口，java项目的启动命令
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+同学们思考一下：以后我们会有很多很多java项目需要打包为镜像，他们都需要Linux系统环境、JDK环境这两层，只有上面的3层不同（因为jar包不同）。如果每次制作java镜像都重复制作前两层镜像，是不是很麻烦。
+
+所以，就有人提供了基础的系统加JDK环境，我们在此基础上制作java镜像，就可以省去JDK的配置了：
+
+```Dockerfile
+# 基础镜像
+FROM openjdk:11.0-jre-buster
+# 设定时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# 拷贝jar包
+COPY docker-demo.jar /app.jar
+# 入口
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+是不是简单多了。
+
+#### 构建镜像
+
+当Dockerfile文件写好以后，就可以利用命令来构建镜像了。
+
+在课前资料中，我们准备好了一个demo项目及对应的Dockerfile：
+
+<img src="assets/image-20250825215811131.png" alt="image-20250825215811131" style="zoom:50%;" align="left">
+
+首先，我们将课前资料提供的`docker-demo.jar`包以及`Dockerfile`拷贝到虚拟机的`/root/demo`目录：
+
+<img src="assets/image-20250825215905904.png" alt="image-20250825215905904" style="zoom:50%;" align="left">
+
+然后，执行命令，构建镜像：
+
+```Bash
+# 进入镜像目录
+cd /root/demo
+# 开始构建
+docker build -t docker-demo:1.0 .
+```
+
+命令说明：
+
+- `docker build`：就是构建一个docker镜像
+- `-t docker-demo:1.0`：`-t`参数是指定镜像的名称（`repository`和`tag`）
+- `.`：最后的点是指构建时Dockerfile所在路径，由于我们进入了demo目录，所以指定的时`.`代表当前目录，也可以直接指定Dockerfile目录：
+
+```Bash
+# 直接指定Dockerfile目录
+docker build -t docker-demo:1.0 /root/demo
+```
+
+结果：
+
+<img src="assets/image-20250825220537981.png" alt="image-20250825220537981" style="zoom:40%;" align="left">
+
+查看镜像列表：
+
+```Bash
+# 查看镜像列表：
+docker images
+# 结果
+REPOSITORY    TAG       IMAGE ID       CREATED          SIZE
+docker-demo   1.0       d6ab0b9e64b9   27 minutes ago   327MB
+nginx         latest    605c77e624dd   16 months ago    141MB
+mysql         latest    3218b38490ce   17 months ago    516MB
+```
+
+然后尝试运行该镜像：
+
+```Bash
+# 1.创建并运行容器
+docker run -d --name dd -p 8080:8080 docker-demo:1.0
+# 2.查看容器
+dps
+# 结果
+CONTAINER ID   IMAGE             PORTS                                                  STATUS         NAMES
+78a000447b49   docker-demo:1.0   0.0.0.0:8080->8080/tcp, :::8090->8090/tcp              Up 2 seconds   dd
+f63cfead8502   mysql             0.0.0.0:3306->3306/tcp, :::3306->3306/tcp, 33060/tcp   Up 2 hours     mysql
+
+# 3.访问
+curl localhost:8080/hello/count
+# 结果：
+<h5>欢迎访问黑马商城, 这是您第1次访问<h5>
+```
 
